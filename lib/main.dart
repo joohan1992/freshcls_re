@@ -2,12 +2,18 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:universal_html/html.dart' as html;
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
+import 'package:image/image.dart' as img;
 
 Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
 
+  /*
   Future<bool> _getStatuses() async {
     Map<Permission, PermissionStatus> statuses =
     await [Permission.storage, Permission.camera].request();
@@ -19,6 +25,13 @@ Future<void> main() async {
       return Future.value(false);
     }
   }
+  */
+
+  // bool isGranted = await _getStatuses();
+  // print(isGranted);
+  // await html.window.navigator.getUserMedia(audio: true, video: true);
+  // isGranted = await _getStatuses();
+  // print(isGranted);
 
   // 디바이스에서 이용가능한 카메라 목록을 받아옵니다.
   final cameras = await availableCameras();
@@ -33,6 +46,34 @@ Future<void> main() async {
       camera: firstCamera,
     ),
   ),);
+}
+
+requestInference(String path) async {
+  var file = File(path);
+  String url = 'http://192.168.0.88:8080/run';
+  // print(bytes);
+
+  img.Image? image = img.decodeImage(file.readAsBytesSync());
+
+  // Resize the image to a 120x? thumbnail (maintaining the aspect ratio).
+  img.Image thumbnail = img.copyResize(image!, width: 299, height: 299);
+
+  print(thumbnail.length);
+  print(img.encodeJpg(thumbnail).length);
+  print(thumbnail.getPixel(0, 0));
+
+  var postUri = Uri.parse(url);
+  var request = http.MultipartRequest("POST", postUri);
+  Map<String, String> headers = {"Content-type": "multipart/form-data"};
+  request.fields['test'] = '123';
+  request.files.add(http.MultipartFile.fromBytes('file', img.encodeJpg(thumbnail), filename: 'attachFile', contentType: MediaType('image', 'jpeg')),);
+  //request.files.add(http.MultipartFile('file',file.readAsBytes().asStream(), file.lengthSync(),filename: 'attachFile',),);
+  // request.files.add(http.MultipartFile.fromBytes('file', await file.readAsBytes(), contentType: MediaType('image', 'jpeg')));
+  request.headers.addAll(headers);
+
+  var res = await request.send();
+
+  return res;
 }
 
 // A screen that takes in a list of cameras and the Directory to store images.
@@ -119,15 +160,21 @@ class TakePictureScreenState extends State<TakePictureScreen> {
             );
 
             // 사진 촬영을 시도하고 저장되는 경로를 로그로 남깁니다.
-            await _controller.takePicture();
+            XFile xfile = await _controller.takePicture();
+            print(xfile.path);
+
+            //print(bytes);
+
+            var response = await requestInference(xfile.path);
+            print(response.stream.bytesToString());
 
             // 사진을 촬영하면, 새로운 화면으로 넘어갑니다.
-            Navigator.push(
+            /*Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => DisplayPictureScreen(imagePath: path),
+                builder: (context) => DisplayPictureScreen(imagePath: xfile.path),
               ),
-            );
+            );*/
           } catch (e) {
             // 만약 에러가 발생하면, 콘솔에 에러 로그를 남깁니다.
             print(e);
