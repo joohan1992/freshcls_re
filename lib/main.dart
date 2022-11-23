@@ -1,59 +1,44 @@
-import 'dart:io';
-
-import 'package:camera/camera.dart';
+import 'dart:io' as io;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:path/path.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:universal_html/html.dart' as html;
+
+import 'package:camera/camera.dart' as camlib;
+
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image/image.dart' as img;
 
+import 'package:flutter/foundation.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  /*
-  Future<bool> _getStatuses() async {
-    Map<Permission, PermissionStatus> statuses =
-    await [Permission.storage, Permission.camera].request();
-
-    if (await Permission.camera.isGranted &&
-        await Permission.storage.isGranted) {
-      return Future.value(true);
-    } else {
-      return Future.value(false);
-    }
-  }
-  */
-
-  // bool isGranted = await _getStatuses();
-  // print(isGranted);
-  // await html.window.navigator.getUserMedia(audio: true, video: true);
-  // isGranted = await _getStatuses();
-  // print(isGranted);
-
-  // 디바이스에서 이용가능한 카메라 목록을 받아옵니다.
-  final cameras = await availableCameras();
-
-  // 이용가능한 카메라 목록에서 특정 카메라를 얻습니다.
-  final firstCamera = cameras.first;
+  // 테스트용 https에서만 사용할 인증 절차 무시하는 코드
+  // TODO 실서비스 배포시 삭제
+  io.HttpOverrides.global = NoCheckCertificateHttpOverrides();
 
   runApp(MaterialApp(
     theme: ThemeData.dark(),
-    home: TakePictureScreen(
-      // 적절한 카메라를 TakePictureScreen 위젯에게 전달합니다.
-      camera: firstCamera,
-    ),
+    home: CameraApp(),
   ),);
 }
 
-requestInference(String path) async {
-  var file = File(path);
-  String url = 'http://192.168.0.88:8080/run';
+class NoCheckCertificateHttpOverrides extends io.HttpOverrides {
+  @override
+  io.HttpClient createHttpClient(io.SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback =
+          (io.X509Certificate cert, String host, int port) => true;
+  }
+}
+
+requestInference(camlib.XFile xfile) async {
+  // var file = File(xfile.path);
+
+  String url = 'https://192.168.0.88:443/run';
   // print(bytes);
 
-  img.Image? image = img.decodeImage(file.readAsBytesSync());
+  img.Image? image = img.decodeImage(await xfile.readAsBytes());
 
   // Resize the image to a 120x? thumbnail (maintaining the aspect ratio).
   img.Image thumbnail = img.copyResize(image!, width: 299, height: 299);
@@ -76,9 +61,325 @@ requestInference(String path) async {
   return res;
 }
 
+class CameraApp extends StatefulWidget {
+  @override
+  _CameraAppState createState() => _CameraAppState();
+}
+
+class _CameraAppState extends State<CameraApp> {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+        home: Scaffold(
+          appBar: AppBar(title: Text('Camera test')),
+          body: AppBody(),
+        ));
+  }
+}
+
+class AppBody extends StatefulWidget {
+  @override
+  _AppBodyState createState() => _AppBodyState();
+}
+
+class _AppBodyState extends State<AppBody> {
+  bool cameraAccess = false;
+  String? error;
+  List<camlib.CameraDescription>? cameras;
+
+  @override
+  void initState() {
+    getCameras();
+    super.initState();
+  }
+
+  Future<void> getCameras() async {
+    try {
+      if (html.window.navigator.mediaDevices != null) {
+        await html.window.navigator.mediaDevices!
+            .getUserMedia({'video': true, 'audio': false});
+      }
+      setState(() {
+        cameraAccess = true;
+      });
+      final cameras = await camlib.availableCameras();
+      setState(() {
+        this.cameras = cameras;
+      });
+    } on html.DomException catch (e) {
+      setState(() {
+        error = '${e.name}: ${e.message}';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (error != null) {
+      return Center(child: Text('Error: $error'));
+    }
+    if (!cameraAccess) {
+      return Center(child: Text('Camera access not granted yet.'));
+    }
+    if (cameras == null) {
+      return Center(child: Text('Reading cameras'));
+    }
+    return CameraView(cameras: cameras!);
+  }
+}
+
+
+class CameraView extends StatefulWidget {
+  final List<camlib.CameraDescription> cameras;
+
+  const CameraView({Key? key, required this.cameras}) : super(key: key);
+
+  @override
+  _CameraViewState createState() => _CameraViewState();
+}
+
+class _CameraViewState extends State<CameraView> {
+  String? error;
+  camlib.CameraController? controller;
+  double? zoomLevel;
+  late camlib.CameraDescription cameraDescription = widget.cameras[0];
+
+  double? minZoom;
+  double? maxZoom;
+
+  double? minExposure;
+  double? maxExposure;
+  double? exposure;
+
+  bool recording = false;
+  bool flashLight = false;
+  bool orientationLocked = false;
+
+  Future<void> initCam(camlib.CameraDescription description) async {
+    setState(() {
+      controller = camlib.CameraController(description, camlib.ResolutionPreset.max);
+    });
+
+    try {
+      print("!?");
+      print(description);
+      print(controller);
+      await controller!.initialize();
+      print("?!");
+
+      final minZoom = await controller!.getMinZoomLevel();
+      final maxZoom = await controller!.getMaxZoomLevel();
+
+      final minExposure = await controller!.getMinExposureOffset();
+      final maxExposure = await controller!.getMaxExposureOffset();
+
+      print(minZoom);
+      print(maxZoom);
+      print(maxExposure);
+      print(minExposure);
+      setState(() {
+        this.minZoom = minZoom;
+        this.maxZoom = maxZoom;
+        this.zoomLevel = minZoom;
+
+        this.minExposure = minExposure;
+        this.maxExposure = maxExposure;
+        this.exposure = 1;
+      });
+    } catch (e) {
+      setState(() {
+        error = e.toString();
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    initCam(cameraDescription);
+  }
+
+  @override
+  void dispose() {
+    controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    if (error != null) {
+      return Center(
+        child: Text('Initializing error: $error\nCamera list:'),
+      );
+    }
+    if (controller == null) {
+      return Center(child: Text('Loading controller...'));
+    }
+    if (!controller!.value.isInitialized) {
+      return Center(child: Text('Initializing camera...'));
+    }
+
+    return SingleChildScrollView(
+      child: Column(children: [
+        AspectRatio(aspectRatio: 16 / 9, child: camlib.CameraPreview(controller!)),
+        Material(
+          child: DropdownButton<camlib.CameraDescription>(
+            value: cameraDescription,
+            icon: const Icon(Icons.arrow_downward),
+            iconSize: 24,
+            elevation: 16,
+            onChanged: (camlib.CameraDescription? newValue) async {
+              if (controller != null) {
+                await controller!.dispose();
+              }
+              setState(() {
+                controller = null;
+                cameraDescription = newValue!;
+              });
+
+              await initCam(newValue!);
+            },
+            items: widget.cameras
+                .map<DropdownMenuItem<camlib.CameraDescription>>((value) {
+              return DropdownMenuItem<camlib.CameraDescription>(
+                value: value,
+                child: Text('${value.name}: ${value.lensDirection}'),
+              );
+            }).toList(),
+          ),
+        ),
+        if (!recording)
+          ElevatedButton(
+            onPressed: controller == null
+                ? null
+                : () async {
+              await controller!.startVideoRecording();
+              setState(() {
+                recording = true;
+              });
+            },
+            child: Text('Record video'),
+          ),
+        if (recording)
+          ElevatedButton(
+            onPressed: () async {
+              final file = await controller!.stopVideoRecording();
+              final bytes = await file.readAsBytes();
+              final uri =
+              Uri.dataFromBytes(bytes, mimeType: 'video/webm;codecs=vp8');
+
+              final link = html.AnchorElement(href: uri.toString());
+              link.download = 'recording.webm';
+              link.click();
+              link.remove();
+              setState(() {
+                recording = false;
+              });
+            },
+            child: Text('Stop recording'),
+          ),
+        SizedBox(height: 10),
+        ElevatedButton(
+          onPressed: controller == null
+              ? null
+              : () async {
+            controller!.lockCaptureOrientation();
+
+            camlib.XFile xfile = await controller!.takePicture();
+            Uint8List byteImg = await xfile.readAsBytes();
+
+            print(byteImg);
+
+            var response = await requestInference(xfile);
+            print(response.stream.bytesToString());
+
+            // 사진을 촬영하면, 새로운 화면으로 넘어갑니다.
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => DisplayPictureScreen(image: byteImg),
+              ),
+            );
+          },
+          child: Text('Take picture'),
+        ),
+        SizedBox(height: 10),
+        if (!orientationLocked)
+          ElevatedButton(
+              onPressed: () {
+                controller!.lockCaptureOrientation();
+                setState(() {
+                  orientationLocked = true;
+                });
+              },
+              child: Text('Lock orientation')),
+        if (orientationLocked)
+          ElevatedButton(
+              onPressed: () {
+                controller!.unlockCaptureOrientation();
+                setState(() {
+                  orientationLocked = false;
+                });
+              },
+              child: Text('Unlock orientation')),
+        SizedBox(height: 10),
+        if (!flashLight)
+          ElevatedButton(
+              onPressed: () {
+                controller!.setFlashMode(camlib.FlashMode.always);
+                setState(() {
+                  flashLight = true;
+                });
+              },
+              child: Text('Turn flashlight on')),
+        if (flashLight)
+          ElevatedButton(
+              onPressed: () {
+                controller!.setFlashMode(camlib.FlashMode.off);
+                setState(() {
+                  flashLight = false;
+                });
+              },
+              child: Text('Turn flashlight off')),
+        SizedBox(height: 10),
+        if (zoomLevel != null && maxZoom != null)
+          Text('Zoom level: $zoomLevel/$maxZoom'),
+        if (zoomLevel != null && minZoom != null && maxZoom != null)
+          Slider(
+            value: zoomLevel!,
+            onChanged: (newValue) {
+              setState(() {
+                zoomLevel = newValue;
+              });
+              controller!.setZoomLevel(newValue);
+            },
+            min: minZoom!,
+            max: maxZoom!,
+          ),
+        if (exposure != null && maxExposure != null)
+          Text('Exposure offset: $exposure/$maxExposure'),
+        if (exposure != null && minExposure != null && maxExposure != null)
+          Slider(
+            value: exposure!,
+            onChanged: (newValue) {
+              setState(() {
+                exposure = newValue;
+              });
+              controller!.setExposureOffset(newValue);
+            },
+            min: minExposure!,
+            max: maxExposure!,
+          ),
+        SizedBox(height: 10),
+      ]),
+    );
+  }
+}
+
 // A screen that takes in a list of cameras and the Directory to store images.
 class TakePictureScreen extends StatefulWidget {
-  final CameraDescription camera;
+  final camlib.CameraDescription camera;
 
   const TakePictureScreen({
     Key? key,
@@ -92,20 +393,21 @@ class TakePictureScreen extends StatefulWidget {
 class TakePictureScreenState extends State<TakePictureScreen> {
   // CameraController와 Future를 저장하기 위해 두 개의 변수를 state 클래스에
   // 정의합니다.
-  late CameraController _controller;
+  late camlib.CameraController _controller;
   late Future<void> _initializeControllerFuture;
 
   @override
   void initState() {
     super.initState();
+
     // 카메라의 현재 출력물을 보여주기 위해
     // CameraController를 생성합니다.
-    _controller = CameraController(
+    _controller = camlib.CameraController(
       // Get a specific camera from the list of available cameras.
       // 이용 가능한 카메라 목록에서 특정 카메라를 가져옵니다.
       widget.camera,
       // 적용할 해상도를 지정합니다.
-      ResolutionPreset.medium,
+      camlib.ResolutionPreset.medium,
     );
 
     // 다음으로 controller를 초기화합니다. 초기화 메서드는 Future를 반환합니다.
@@ -130,7 +432,7 @@ class TakePictureScreenState extends State<TakePictureScreen> {
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.done) {
             // Future가 완료되면, 프리뷰를 보여줍니다.
-            return CameraPreview(_controller);
+            return camlib.CameraPreview(_controller);
           } else {
             // 그렇지 않다면, 진행 표시기를 보여줍니다.
             return Center(child: CircularProgressIndicator());
@@ -147,40 +449,45 @@ class TakePictureScreenState extends State<TakePictureScreen> {
             // 카메라 초기화가 완료됐는지 확인합니다.
             await _initializeControllerFuture;
 
-            Directory tempDir = await getTemporaryDirectory();
-            String tempPath = tempDir.path;
-
-            // path 패키지를 사용하여 이미지가 저장될 경로를 지정합니다.
-            final path = join(
-              // 본 예제에서는 임시 디렉토리에 이미지를 저장합니다. `path_provider`
-              // 플러그인을 사용하여 임시 디렉토리를 찾으세요.
-              tempPath,
-              // (await getTemporaryDirectory()).path,
-              '${DateTime.now()}.png',
-            );
-
             // 사진 촬영을 시도하고 저장되는 경로를 로그로 남깁니다.
-            XFile xfile = await _controller.takePicture();
-            print(xfile.path);
+            camlib.XFile xfile = await _controller.takePicture();
+            Uint8List byteImg = await xfile.readAsBytes();
 
             //print(bytes);
 
-            var response = await requestInference(xfile.path);
+            var response = await requestInference(xfile);
             print(response.stream.bytesToString());
 
             // 사진을 촬영하면, 새로운 화면으로 넘어갑니다.
-            /*Navigator.push(
+            Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => DisplayPictureScreen(imagePath: xfile.path),
+                builder: (context) => DisplayPictureScreen(image: byteImg),
               ),
-            );*/
+            );
           } catch (e) {
             // 만약 에러가 발생하면, 콘솔에 에러 로그를 남깁니다.
             print(e);
           }
         },
       ),
+      /*
+      floatingActionButton: FloatingActionButton(
+      onPressed: () async {
+        await showDialog(
+            context: context,
+            builder: (BuildContext context) {
+              return FractionallySizedBox(
+                heightFactor: 0.5,
+                widthFactor: 0.5,
+                child: WebCam(),
+              );
+            });
+      },
+      // tooltip: 'Increment',
+      child: Icon(Icons.add),
+    ),
+       */
     );
   }
 }
@@ -188,9 +495,9 @@ class TakePictureScreenState extends State<TakePictureScreen> {
 
 // 사용자가 촬영한 사진을 보여주는 위젯
 class DisplayPictureScreen extends StatelessWidget {
-  final String imagePath;
+  final Uint8List image;
 
-  const DisplayPictureScreen({Key? key, required this.imagePath}) : super(key: key);
+  const DisplayPictureScreen({Key? key, required this.image}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -198,7 +505,112 @@ class DisplayPictureScreen extends StatelessWidget {
       appBar: AppBar(title: Text('Display the Picture')),
       // 이미지는 디바이스에 파일로 저장됩니다. 이미지를 보여주기 위해 주어진
       // 경로로 `Image.file`을 생성하세요.
-      body: Image.file(File(imagePath)),
+      body: Image.memory(image),
     );
   }
 }
+
+/*
+class WebCam extends StatefulWidget {
+  @override
+  _WebCamState createState() => _WebCamState();
+}
+
+class _WebCamState extends State<WebCam> {
+  static html.VideoElement _webcamVideoElement = html.VideoElement();
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Register a webcam
+    // ignore: undefined_prefixed_name
+    html.platformViewRegistry.registerViewFactory('webcamVideoElement',
+            (int viewId) {
+          getMedia();
+          return _webcamVideoElement;
+        });
+  }
+
+  getMedia() {
+    html.window.navigator.mediaDevices
+        ?.getUserMedia({"video": true}).then((streamHandle) {
+      _webcamVideoElement
+        ..srcObject = streamHandle
+        ..autoplay = true;
+    }).catchError((onError) {
+      print(onError);
+    });
+  }
+
+  switchCameraOff() {
+    if (_webcamVideoElement.srcObject != null &&
+        _webcamVideoElement.srcObject!.active!) {
+      var tracks = _webcamVideoElement.srcObject!.getTracks();
+
+      //stopping tracks and setting srcObject to null to switch camera off
+      _webcamVideoElement.srcObject = null;
+
+      tracks.forEach((track) {
+        track.stop();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    switchCameraOff();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          Container(
+              child: new HtmlElementView(
+                key: UniqueKey(),
+                viewType: 'webcamVideoElement',
+              )),
+          Container(
+            child: Column(
+              children: [
+                ElevatedButton(
+                  child: Text('Play/Pause'),
+                  onPressed: () async {
+                    if (_webcamVideoElement.paused) {
+                      _webcamVideoElement.play();
+                    } else {
+                      _webcamVideoElement.pause();
+                    }
+                  },
+                ),
+                ElevatedButton(
+                  child: Text('Switch off'),
+                  onPressed: () {
+                    switchCameraOff();
+                  },
+                ),
+                ElevatedButton(
+                  child: Text('Switch on'),
+                  onPressed: () {
+                    if (_webcamVideoElement.srcObject == null) getMedia();
+                  },
+                ),
+                ElevatedButton(
+                  child: Text('Capture'),
+                  onPressed: () {
+                    var cpt = _webcamVideoElement.captureStream().getVideoTracks().first;
+                    print(cpt);
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}*/
