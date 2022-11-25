@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io' as io;
 import 'package:flutter/material.dart';
 import 'package:universal_html/html.dart' as html;
@@ -37,7 +38,7 @@ class NoCheckCertificateHttpOverrides extends io.HttpOverrides {
 requestInference(camlib.XFile xfile) async {
   // var file = File(xfile.path);
 
-  String url = 'https://10.28.100.11:5443/run';
+  String url = 'https://192.168.0.88:5443/run';
   // print(bytes);
 
   img.Image? image = img.decodeImage(await xfile.readAsBytes());
@@ -59,6 +60,10 @@ requestInference(camlib.XFile xfile) async {
   request.headers.addAll(headers);
 
   var res = await request.send();
+
+  res.stream.transform(utf8.decoder).listen((value) {
+    print(value);
+  });
 
   return res;
 }
@@ -166,9 +171,12 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
   bool flashLight = false;
   bool orientationLocked = false;
 
+  bool isLoading = false;
+
   late TabController _tabController;
 
   Future<void> initCam(camlib.CameraDescription description) async {
+
     setState(() {
       controller = camlib.CameraController(description, camlib.ResolutionPreset.max);
     });
@@ -240,14 +248,14 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
 
     List<Widget> list_tabs = [
       Container(
-        height: 80,
+        height: 40,
         alignment: Alignment.center,
         child: Text(
           'Camera',
         ),
       ),
       Container(
-        height: 80,
+        height: 40,
         alignment: Alignment.center,
         child: Text(
           'File',
@@ -265,55 +273,81 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
       controller: _tabController,
     );
 
+    List<Widget> list_results = [];
+
+    camlib.CameraPreview cameraPreview = camlib.CameraPreview(controller!);
+
+    Widget viewToShow = cameraPreview;
+    if (isLoading) {
+      viewToShow = Image(image: AssetImage('assets/loading.jpg'));
+    }
+
     SingleChildScrollView cameraView = SingleChildScrollView(
       child: Column(children: [
-        ElevatedButton(onPressed: () {
-          requestPost();
-        }, child: Text('POST')),
-        AspectRatio(aspectRatio: 16 / 9, child: camlib.CameraPreview(controller!)),
-        if (!recording)
-          ElevatedButton(
-            onPressed: controller == null
-                ? null
-                : () async {
-              await controller!.startVideoRecording();
-              setState(() {
-                recording = true;
-              });
-            },
-            child: Text('Record video'),
-          ),
-        if (recording)
-          ElevatedButton(
-            onPressed: () async {
-              final file = await controller!.stopVideoRecording();
-              final bytes = await file.readAsBytes();
-              final uri =
-              Uri.dataFromBytes(bytes, mimeType: 'video/webm;codecs=vp8');
-
-              final link = html.AnchorElement(href: uri.toString());
-              link.download = 'recording.webm';
-              link.click();
-              link.remove();
-              setState(() {
-                recording = false;
-              });
-            },
-            child: Text('Stop recording'),
-          ),
-        SizedBox(height: 10),
+        AspectRatio(aspectRatio: 1.4/1,
+          child: viewToShow,
+        ),
+        Container(
+          child: Text("Results"),
+        ),
+        Container(
+          height: 200,
+          child:
+            SingleChildScrollView(
+              child: Column(
+                children: list_results,
+              ),
+            ),
+        ),
+        // if (!recording)
+        //   ElevatedButton(
+        //     onPressed: controller == null
+        //         ? null
+        //         : () async {
+        //       await controller!.startVideoRecording();
+        //       setState(() {
+        //         recording = true;
+        //       });
+        //     },
+        //     child: Text('Record video'),
+        //   ),
+        // if (recording)
+        //   ElevatedButton(
+        //     onPressed: () async {
+        //       final file = await controller!.stopVideoRecording();
+        //       final bytes = await file.readAsBytes();
+        //       final uri =
+        //       Uri.dataFromBytes(bytes, mimeType: 'video/webm;codecs=vp8');
+        //
+        //       final link = html.AnchorElement(href: uri.toString());
+        //       link.download = 'recording.webm';
+        //       link.click();
+        //       link.remove();
+        //       setState(() {
+        //         recording = false;
+        //       });
+        //     },
+        //     child: Text('Stop recording'),
+        //   ),
+        // SizedBox(height: 10),
         ElevatedButton(
           onPressed: controller == null
               ? null
               : () async {
+
+            setState(() {
+              isLoading = true;
+            });
             controller!.lockCaptureOrientation();
 
             camlib.XFile xfile = await controller!.takePicture();
             Uint8List byteImg = await xfile.readAsBytes();
 
             print(byteImg);
-
             var response = await requestInference(xfile);
+            setState(() {
+              isLoading = false;
+            });
             print(response.stream.bytesToString());
 
             // 사진을 촬영하면, 새로운 화면으로 넘어갑니다.
@@ -326,74 +360,74 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
           },
           child: Text('Take picture'),
         ),
-        SizedBox(height: 10),
-        if (!orientationLocked)
-          ElevatedButton(
-              onPressed: () {
-                controller!.lockCaptureOrientation();
-                setState(() {
-                  orientationLocked = true;
-                });
-              },
-              child: Text('Lock orientation')),
-        if (orientationLocked)
-          ElevatedButton(
-              onPressed: () {
-                controller!.unlockCaptureOrientation();
-                setState(() {
-                  orientationLocked = false;
-                });
-              },
-              child: Text('Unlock orientation')),
-        SizedBox(height: 10),
-        if (!flashLight)
-          ElevatedButton(
-              onPressed: () {
-                controller!.setFlashMode(camlib.FlashMode.always);
-                setState(() {
-                  flashLight = true;
-                });
-              },
-              child: Text('Turn flashlight on')),
-        if (flashLight)
-          ElevatedButton(
-              onPressed: () {
-                controller!.setFlashMode(camlib.FlashMode.off);
-                setState(() {
-                  flashLight = false;
-                });
-              },
-              child: Text('Turn flashlight off')),
-        SizedBox(height: 10),
-        if (zoomLevel != null && maxZoom != null)
-          Text('Zoom level: $zoomLevel/$maxZoom'),
-        if (zoomLevel != null && minZoom != null && maxZoom != null)
-          Slider(
-            value: zoomLevel!,
-            onChanged: (newValue) {
-              setState(() {
-                zoomLevel = newValue;
-              });
-              controller!.setZoomLevel(newValue);
-            },
-            min: minZoom!,
-            max: maxZoom!,
-          ),
-        if (exposure != null && maxExposure != null)
-          Text('Exposure offset: $exposure/$maxExposure'),
-        if (exposure != null && minExposure != null && maxExposure != null)
-          Slider(
-            value: exposure!,
-            onChanged: (newValue) {
-              setState(() {
-                exposure = newValue;
-              });
-              controller!.setExposureOffset(newValue);
-            },
-            min: minExposure!,
-            max: maxExposure!,
-          ),
-        SizedBox(height: 10),
+        // SizedBox(height: 10),
+        // if (!orientationLocked)
+        //   ElevatedButton(
+        //       onPressed: () {
+        //         controller!.lockCaptureOrientation();
+        //         setState(() {
+        //           orientationLocked = true;
+        //         });
+        //       },
+        //       child: Text('Lock orientation')),
+        // if (orientationLocked)
+        //   ElevatedButton(
+        //       onPressed: () {
+        //         controller!.unlockCaptureOrientation();
+        //         setState(() {
+        //           orientationLocked = false;
+        //         });
+        //       },
+        //       child: Text('Unlock orientation')),
+        // SizedBox(height: 10),
+        // if (!flashLight)
+        //   ElevatedButton(
+        //       onPressed: () {
+        //         controller!.setFlashMode(camlib.FlashMode.always);
+        //         setState(() {
+        //           flashLight = true;
+        //         });
+        //       },
+        //       child: Text('Turn flashlight on')),
+        // if (flashLight)
+        //   ElevatedButton(
+        //       onPressed: () {
+        //         controller!.setFlashMode(camlib.FlashMode.off);
+        //         setState(() {
+        //           flashLight = false;
+        //         });
+        //       },
+        //       child: Text('Turn flashlight off')),
+        // SizedBox(height: 10),
+        // if (zoomLevel != null && maxZoom != null)
+        //   Text('Zoom level: $zoomLevel/$maxZoom'),
+        // if (zoomLevel != null && minZoom != null && maxZoom != null)
+        //   Slider(
+        //     value: zoomLevel!,
+        //     onChanged: (newValue) {
+        //       setState(() {
+        //         zoomLevel = newValue;
+        //       });
+        //       controller!.setZoomLevel(newValue);
+        //     },
+        //     min: minZoom!,
+        //     max: maxZoom!,
+        //   ),
+        // if (exposure != null && maxExposure != null)
+        //   Text('Exposure offset: $exposure/$maxExposure'),
+        // if (exposure != null && minExposure != null && maxExposure != null)
+        //   Slider(
+        //     value: exposure!,
+        //     onChanged: (newValue) {
+        //       setState(() {
+        //         exposure = newValue;
+        //       });
+        //       controller!.setExposureOffset(newValue);
+        //     },
+        //     min: minExposure!,
+        //     max: maxExposure!,
+        //   ),
+        // SizedBox(height: 10),
       ],
       ),
     );
@@ -420,6 +454,20 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
         ),
       ],
     );
+  }
+}
+
+
+class _MediaSizeClipper extends CustomClipper<Rect> {
+  final Size mediaSize;
+  const _MediaSizeClipper(this.mediaSize);
+  @override
+  Rect getClip(Size size) {
+    return Rect.fromLTWH(0, 0, mediaSize.width, mediaSize.height);
+  }
+  @override
+  bool shouldReclip(CustomClipper<Rect> oldClipper) {
+    return true;
   }
 }
 
@@ -517,23 +565,6 @@ class TakePictureScreenState extends State<TakePictureScreen> {
           }
         },
       ),
-      /*
-      floatingActionButton: FloatingActionButton(
-      onPressed: () async {
-        await showDialog(
-            context: context,
-            builder: (BuildContext context) {
-              return FractionallySizedBox(
-                heightFactor: 0.5,
-                widthFactor: 0.5,
-                child: WebCam(),
-              );
-            });
-      },
-      // tooltip: 'Increment',
-      child: Icon(Icons.add),
-    ),
-       */
     );
   }
 }
@@ -555,108 +586,3 @@ class DisplayPictureScreen extends StatelessWidget {
     );
   }
 }
-
-/*
-class WebCam extends StatefulWidget {
-  @override
-  _WebCamState createState() => _WebCamState();
-}
-
-class _WebCamState extends State<WebCam> {
-  static html.VideoElement _webcamVideoElement = html.VideoElement();
-
-  @override
-  void initState() {
-    super.initState();
-
-    // Register a webcam
-    // ignore: undefined_prefixed_name
-    html.platformViewRegistry.registerViewFactory('webcamVideoElement',
-            (int viewId) {
-          getMedia();
-          return _webcamVideoElement;
-        });
-  }
-
-  getMedia() {
-    html.window.navigator.mediaDevices
-        ?.getUserMedia({"video": true}).then((streamHandle) {
-      _webcamVideoElement
-        ..srcObject = streamHandle
-        ..autoplay = true;
-    }).catchError((onError) {
-      print(onError);
-    });
-  }
-
-  switchCameraOff() {
-    if (_webcamVideoElement.srcObject != null &&
-        _webcamVideoElement.srcObject!.active!) {
-      var tracks = _webcamVideoElement.srcObject!.getTracks();
-
-      //stopping tracks and setting srcObject to null to switch camera off
-      _webcamVideoElement.srcObject = null;
-
-      tracks.forEach((track) {
-        track.stop();
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    switchCameraOff();
-
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          Container(
-              child: new HtmlElementView(
-                key: UniqueKey(),
-                viewType: 'webcamVideoElement',
-              )),
-          Container(
-            child: Column(
-              children: [
-                ElevatedButton(
-                  child: Text('Play/Pause'),
-                  onPressed: () async {
-                    if (_webcamVideoElement.paused) {
-                      _webcamVideoElement.play();
-                    } else {
-                      _webcamVideoElement.pause();
-                    }
-                  },
-                ),
-                ElevatedButton(
-                  child: Text('Switch off'),
-                  onPressed: () {
-                    switchCameraOff();
-                  },
-                ),
-                ElevatedButton(
-                  child: Text('Switch on'),
-                  onPressed: () {
-                    if (_webcamVideoElement.srcObject == null) getMedia();
-                  },
-                ),
-                ElevatedButton(
-                  child: Text('Capture'),
-                  onPressed: () {
-                    var cpt = _webcamVideoElement.captureStream().getVideoTracks().first;
-                    print(cpt);
-                  },
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}*/
