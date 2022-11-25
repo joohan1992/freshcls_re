@@ -17,10 +17,12 @@ Future<void> main() async {
   // TODO 실서비스 배포시 삭제
   io.HttpOverrides.global = NoCheckCertificateHttpOverrides();
 
-  runApp(MaterialApp(
-    theme: ThemeData.dark(),
-    home: CameraApp(),
-  ),);
+  runApp(
+    MaterialApp(
+      theme: ThemeData.dark(),
+      home: CameraApp(),
+    ),
+  );
 }
 
 class NoCheckCertificateHttpOverrides extends io.HttpOverrides {
@@ -35,7 +37,7 @@ class NoCheckCertificateHttpOverrides extends io.HttpOverrides {
 requestInference(camlib.XFile xfile) async {
   // var file = File(xfile.path);
 
-  String url = 'https://192.168.0.88:443/run';
+  String url = 'https://10.28.100.11:5443/run';
   // print(bytes);
 
   img.Image? image = img.decodeImage(await xfile.readAsBytes());
@@ -59,6 +61,15 @@ requestInference(camlib.XFile xfile) async {
   var res = await request.send();
 
   return res;
+}
+
+requestPost() async {
+  String url = 'https://192.168.0.88/test';
+  var postUri = Uri.parse(url);
+  var res = await http.post(postUri, body: {
+    'val1': 'test'
+  });
+  print(res.body);
 }
 
 class CameraApp extends StatefulWidget {
@@ -138,7 +149,7 @@ class CameraView extends StatefulWidget {
   _CameraViewState createState() => _CameraViewState();
 }
 
-class _CameraViewState extends State<CameraView> {
+class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
   String? error;
   camlib.CameraController? controller;
   double? zoomLevel;
@@ -154,6 +165,8 @@ class _CameraViewState extends State<CameraView> {
   bool recording = false;
   bool flashLight = false;
   bool orientationLocked = false;
+
+  late TabController _tabController;
 
   Future<void> initCam(camlib.CameraDescription description) async {
     setState(() {
@@ -197,6 +210,11 @@ class _CameraViewState extends State<CameraView> {
   void initState() {
     super.initState();
     initCam(cameraDescription);
+    _tabController = TabController(
+      length: 2,
+      vsync: this,  //vsync에 this 형태로 전달해야 애니메이션이 정상 처리됨
+    );
+    super.initState();
   }
 
   @override
@@ -220,35 +238,39 @@ class _CameraViewState extends State<CameraView> {
       return Center(child: Text('Initializing camera...'));
     }
 
-    return SingleChildScrollView(
-      child: Column(children: [
-        AspectRatio(aspectRatio: 16 / 9, child: camlib.CameraPreview(controller!)),
-        Material(
-          child: DropdownButton<camlib.CameraDescription>(
-            value: cameraDescription,
-            icon: const Icon(Icons.arrow_downward),
-            iconSize: 24,
-            elevation: 16,
-            onChanged: (camlib.CameraDescription? newValue) async {
-              if (controller != null) {
-                await controller!.dispose();
-              }
-              setState(() {
-                controller = null;
-                cameraDescription = newValue!;
-              });
-
-              await initCam(newValue!);
-            },
-            items: widget.cameras
-                .map<DropdownMenuItem<camlib.CameraDescription>>((value) {
-              return DropdownMenuItem<camlib.CameraDescription>(
-                value: value,
-                child: Text('${value.name}: ${value.lensDirection}'),
-              );
-            }).toList(),
-          ),
+    List<Widget> list_tabs = [
+      Container(
+        height: 80,
+        alignment: Alignment.center,
+        child: Text(
+          'Camera',
         ),
+      ),
+      Container(
+        height: 80,
+        alignment: Alignment.center,
+        child: Text(
+          'File',
+        ),
+      ),
+    ];
+
+    TabBar tabBar = TabBar(
+      tabs: list_tabs,
+      indicator: BoxDecoration(
+        color: Colors.white,
+      ),
+      labelColor: Colors.black,
+      unselectedLabelColor: Colors.black,
+      controller: _tabController,
+    );
+
+    SingleChildScrollView cameraView = SingleChildScrollView(
+      child: Column(children: [
+        ElevatedButton(onPressed: () {
+          requestPost();
+        }, child: Text('POST')),
+        AspectRatio(aspectRatio: 16 / 9, child: camlib.CameraPreview(controller!)),
         if (!recording)
           ElevatedButton(
             onPressed: controller == null
@@ -372,7 +394,31 @@ class _CameraViewState extends State<CameraView> {
             max: maxExposure!,
           ),
         SizedBox(height: 10),
-      ]),
+      ],
+      ),
+    );
+
+    return Column(children: [
+      tabBar,
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              cameraView,
+              Container(
+                color: Colors.green[200],
+                alignment: Alignment.center,
+                child: Text(
+                  'Tab2 View',
+                  style: TextStyle(
+                    fontSize: 30,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
