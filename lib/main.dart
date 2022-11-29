@@ -39,7 +39,7 @@ requestInference(camlib.XFile xfile) async {
   String url = 'https://192.168.0.88:5443/run';
   var postUri = Uri.parse(url);
 
-  String CRUDENTIAL_KEY = "7{@:M8IR;DW\\/X71uhHOd[nxa@uB%+m(/<Owq5LZ.kO%K583{t-fDb'GkE\$YscX?N`X}M=WnMC<Ed}a4.\$.lvDPL=q;i237fvcDjPPXmY`r.FU`@D*nQ]mBTNb#t7_Qw*Tr?f6]aTWm},Z(8L&^xI\$^5Ccru'a.}'/uaN+{d\\Ox#FWv(ZT,>8vVC}kc2q2&'.qddiHnN}^*L]A*ZMT,{soMw@BrppFG[OIrv_bD/b67H:H0-;dxDID/Y[Yhz{y~VUVG|(aZ]]xj[jB*q)ARPA>)S._*JH]iE!zlnFzBatlkAfvy";
+  String CRUDENTIAL_KEY = "testauthcode";
 
   img.Image? image = img.decodeImage(await xfile.readAsBytes());
 
@@ -75,6 +75,43 @@ requestInference(camlib.XFile xfile) async {
   print(byteImg.length);
 
   return resultMap;
+}
+
+sendFeedback(context, infer_no, title, list_label) async {
+  print(title);
+
+  if (title == null) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            LabelSeletionScreen(infer_no: infer_no, predict_labels: list_label,),
+      ),
+    );
+  } else {
+    String url = 'https://192.168.0.88:5443/infer_feedback';
+    var postUri = Uri.parse(url);
+
+    String CRUDENTIAL_KEY = "testauthcode";
+
+    var header = {"Content-type": "application/json", 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET'};
+    http.Response res = await http.post(postUri, headers:header, body: json.encode({
+      "key": CRUDENTIAL_KEY,
+      "auth": 'code',
+      "ID": 'None',
+      "PW": 'None',
+      "feedback": title,
+      "infer_no": infer_no,
+    }));
+
+    String resBody = utf8.decode(res.bodyBytes);
+    Map<String, dynamic> resultMap = jsonDecode(resBody);
+
+    print(resultMap['result']);
+    resultMap['result'] = 'ok';
+
+    return resultMap;
+  }
 }
 
 class CameraApp extends StatefulWidget {
@@ -218,7 +255,6 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
 
   @override
   void initState() {
-    super.initState();
     initCam(cameraDescription);
     _tabController = TabController(
       length: 2,
@@ -300,20 +336,6 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
       );
     }
 
-    sendFeedback(context, infer_no, title, list_label) {
-      print(title);
-
-      if (title == null) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) =>
-                LabelSeletionScreen(infer_no: infer_no, predict_labels: list_label,),
-          ),
-        );
-      }
-    }
-
     SingleChildScrollView cameraView = SingleChildScrollView(
       child: Column(
         children: [
@@ -355,14 +377,22 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
                 Uint8List byteImg = await xfile.readAsBytes();
 
                 Map<String, dynamic> resultMap = await requestInference(xfile);
+                print(resultMap);
                 captured = resultMap['thumbnail'];
                 int infer_no = resultMap['infer_no'];
                 List<Widget> tmp_list_results = [];
-                List<dynamic> list_infer = resultMap['cls_list'];
-                for (var element in list_infer) {
+                List<String>? list_infer = (resultMap['cls_list'] as List)?.map((item) => item as String)?.toList();
+                for (var element in list_infer!) {
                   tmp_list_results.add(
                       ElevatedButton(
-                        onPressed: () async {sendFeedback(context, infer_no, element, list_infer); },
+                        onPressed: () async {
+                          sendFeedback(context, infer_no, element, list_infer);
+
+                          setState(() {
+                            suspending = false;
+                            list_results = [];
+                          });
+                        },
                         style: ElevatedButton.styleFrom(
                             minimumSize: Size(width, 30) // put the width and height you want
                         ),
@@ -370,24 +400,6 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
                       )
                   );
                 }
-                tmp_list_results.add(
-                    ElevatedButton(
-                      onPressed: () async {sendFeedback(context, infer_no, null, list_infer); },
-                      style: ElevatedButton.styleFrom(
-                          minimumSize: Size(width, 30) // put the width and height you want
-                      ),
-                      child: const Text('기타'),
-                    )
-                );
-                tmp_list_results.add(
-                    ElevatedButton(
-                      onPressed: () async {sendFeedback(context, infer_no, null, list_infer); },
-                      style: ElevatedButton.styleFrom(
-                          minimumSize: Size(width, 30) // put the width and height you want
-                      ),
-                      child: const Text('기타'),
-                    )
-                );
                 tmp_list_results.add(
                     ElevatedButton(
                       onPressed: () async {sendFeedback(context, infer_no, null, list_infer); },
@@ -435,19 +447,92 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
 }
 
 // 기타 선택
-class LabelSeletionScreen extends StatelessWidget {
+class LabelSeletionScreen extends StatefulWidget {
   final int infer_no;
-  final List<dynamic> predict_labels;
+  final List<String> predict_labels;
 
   const LabelSeletionScreen({Key? key, required this.infer_no, required this.predict_labels}) : super(key: key);
+
+  @override
+  State<StatefulWidget> createState() => _LabelSeletionScreenState();
+}
+
+
+class _LabelSeletionScreenState extends State<LabelSeletionScreen>{
+  late Table table;
+
+  @override
+  void initState() {
+    List<TableRow> listTableRow = [];
+    List<Widget> listCell = [];
+    int idx = 0;
+    widget.predict_labels.forEach((element) {
+      listCell.add(
+        TableCell(
+          verticalAlignment: TableCellVerticalAlignment.middle,
+          child: Container(
+            height: 32,
+            color: Colors.green,
+            child: ElevatedButton(
+              onPressed: () async {
+                sendFeedback(context, widget.infer_no, element, null);
+              },
+              child: Text(element),
+            ),
+          )
+        )
+      );
+
+      if(idx%3 == 2) {
+        listTableRow.add(
+          TableRow(
+            children: listCell,
+          )
+        );
+        listCell = [];
+      }
+      idx += 1;
+    });
+    if(idx%3 != 0) {
+      while (idx%3 != 0) {
+        listCell.add(
+            TableCell(
+            verticalAlignment: TableCellVerticalAlignment.middle,
+            child: Container(
+              height: 32,
+            ),
+          )
+        );
+        idx += 1;
+      }
+      listTableRow.add(
+          TableRow(
+            children: listCell,
+          )
+      );
+    }
+    setState(() {
+      table = Table(
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        children: listTableRow,
+      );
+    });
+    print(table);
+    print(listTableRow);
+    print(listCell);
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Choose a Label')),
-      // 이미지는 디바이스에 파일로 저장됩니다. 이미지를 보여주기 위해 주어진
-      // 경로로 `Image.file`을 생성하세요.
-      body: SingleChildScrollView(child: Column(children: [],)),
+      body: SingleChildScrollView(child: table,),
     );
   }
 }
