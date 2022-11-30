@@ -285,6 +285,13 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
       length: 2,
       vsync: this,  //vsync에 this 형태로 전달해야 애니메이션이 정상 처리됨
     );
+    _tabController.addListener(() {
+      if(_tabController.index == 0) {
+        setState(() {
+          initCam(cameraDescription);
+        });
+      }
+    });
     super.initState();
   }
 
@@ -292,6 +299,7 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
     setState(() {
       suspending = false;
       list_results = [];
+      initCam(cameraDescription);
     });
   }
 
@@ -395,6 +403,7 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
                 setState(() {
                   suspending = false;
                   list_results = [];
+                  initCam(cameraDescription);
                 });
               } else {
                 setState(() {
