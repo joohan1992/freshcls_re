@@ -11,12 +11,32 @@ import 'package:image/image.dart' as img;
 
 import 'package:flutter/foundation.dart';
 
+// 카메라 기능 참고
+// https://github.com/flutter/flutter/issues/45297 -> Hexer10
+// https://github.com/Hexer10/plugins/blob/camera-web/packages/camera/camera_web/lib/camera_web.dart
+
+// Tabbar 참고
+// https://eunoia3jy.tistory.com/110
+
+Map<int, String> labelMap = Map();
+List<int> labelList = [];
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 테스트용 https에서만 사용할 인증 절차 무시하는 코드
-  // TODO 실서비스 배포시 삭제
+  // TODO 실서비스 배포시 삭제하거나 개발용에서만 동작하도록 수정
   io.HttpOverrides.global = NoCheckCertificateHttpOverrides();
+
+  Map<String, dynamic> resultMap = await getLabelList();
+  if (resultMap['result'] == 'ok') {
+    List<dynamic> resultLabelList = resultMap['str_label_list'];
+    resultLabelList.forEach((element) {
+      List<dynamic> eleMap = element;
+      labelMap[eleMap[0]] = eleMap[2];
+      labelList.add(eleMap[0]);
+    });
+  }
 
   runApp(
     MaterialApp(
@@ -26,6 +46,7 @@ Future<void> main() async {
   );
 }
 
+// TODO SSL Self-certification으로 인해 추가된 코드, 이후 공식 SSL 적용 시 삭제하거나 개발용에서만 사용하도록 수정
 class NoCheckCertificateHttpOverrides extends io.HttpOverrides {
   @override
   io.HttpClient createHttpClient(io.SecurityContext? context) {
@@ -35,14 +56,46 @@ class NoCheckCertificateHttpOverrides extends io.HttpOverrides {
   }
 }
 
-requestInference(camlib.XFile xfile) async {
+// 선택한 피드백을 서버에 제출
+Future<Map<String, dynamic>> getLabelList() async {
+  // 피드백 제출 URL
+  // TODO 주소는 공통 전역 변수로 변경
+  String url = 'https://192.168.0.88:5443/initialize';
+  var postUri = Uri.parse(url);
+
+  // TODO 인증코드 관련 수정은 위의 추론 요청과 동일
+  String CRUDENTIAL_KEY = "testauthcode";
+
+  var header = {"Content-type": "application/json", 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET'};
+  http.Response res = await http.post(postUri, headers:header, body: json.encode({
+    "key": CRUDENTIAL_KEY,
+    "auth": 'code',
+    "ID": 'None',
+    "PW": 'None',
+    "store_no": 0,
+  }));
+
+  String resBody = utf8.decode(res.bodyBytes);
+  Map<String, dynamic> resultMap = Map.castFrom(jsonDecode(resBody));
+
+  return resultMap;
+}
+
+// img.Image 형식을 입력으로 받아 추론 요청
+requestInference(img.Image? image) async {
+
+  // API 요청 URL
+  // TODO IP(주소) 부분을 공통 전역 변수로 설정해서 불러와서 사용하도록 변경
   String url = 'https://192.168.0.88:5443/run';
   var postUri = Uri.parse(url);
 
+  // 간이 인증용 코드
+  // TODO 1) 코드를 공통 전역 변수로 설정
+  // TODO 2) 로그인 기능 도입 시 세션으로 인증할 수 있도록 변경 필요
   String CRUDENTIAL_KEY = "testauthcode";
 
-  img.Image? image = img.decodeImage(await xfile.readAsBytes());
-
+  // 이미지의 중간 부분을 Crop해서 전달(화면 상에 보이는 부분만 보내도록)
+  // => 촬영 화면에서는 이미지의 중간 부분만 보이도록 되어있지만 캡쳐 시 보이지 않는 위아래 부분도 포함되기 때문에 Crop 필요
   final face = img.copyCrop(
     image!,
     0,
@@ -50,11 +103,15 @@ requestInference(camlib.XFile xfile) async {
     image.width,
     image.width,
   );
+  // 추론에 필요한 크기 299X299로 리사이즈
   img.Image thumbnail = img.copyResize(face, width: 299, height: 299);
-
+  // 바이트로 변환하여 base64로 인코딩하여 전달
   var byteImg = thumbnail.getBytes();
   Codec<String, String> stringToBase64 = utf8.fuse(base64);
   String encoded = stringToBase64.encode(byteImg.toString());
+
+  // json형식으로 보내기 때문에 헤더 설정 필수
+  // TODO 실제 운영 서비스에 올릴 경우 CORS 설정 세분화 필요(주소 지정, 메소드 지정 등)
   var header = {"Content-type": "application/json", 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET'};
   http.Response res = await http.post(postUri, headers:header, body: json.encode({
     "image": encoded,
@@ -65,60 +122,53 @@ requestInference(camlib.XFile xfile) async {
     "auth": 'code',
     "ID": 'None',
     "PW": 'None',
+    'store_no': 0,
+  }));
+
+  // 결과 파일을 Map 형식으로 받아옴
+  String resBody = utf8.decode(res.bodyBytes);
+  Map<String, dynamic> resultMap = Map.castFrom(jsonDecode(resBody));
+
+  // 피드백 화면에서 고정된 이미지를 보여주기 위해 원본 크기의 Crop된 이미지 face 전달
+  resultMap['thumbnail'] = img.encodeJpg(face);
+
+  return resultMap;
+}
+
+// 선택한 피드백을 서버에 제출
+sendFeedback(infer_no, title) async {
+  // 피드백 제출 URL
+  // TODO 주소는 공통 전역 변수로 변경
+  String url = 'https://192.168.0.88:5443/infer_feedback';
+  var postUri = Uri.parse(url);
+
+  // TODO 인증코드 관련 수정은 위의 추론 요청과 동일
+  String CRUDENTIAL_KEY = "testauthcode";
+
+  var header = {"Content-type": "application/json", 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET'};
+  http.Response res = await http.post(postUri, headers:header, body: json.encode({
+    "key": CRUDENTIAL_KEY,
+    "auth": 'code',
+    "ID": 'None',
+    "PW": 'None',
+    "feedback": title,
+    "infer_no": infer_no,
   }));
 
   String resBody = utf8.decode(res.bodyBytes);
   Map<String, dynamic> resultMap = jsonDecode(resBody);
 
-  resultMap['thumbnail'] = img.encodeJpg(thumbnail);
-  print(byteImg);
-  print(byteImg.length);
-
   return resultMap;
 }
 
-sendFeedback(context, infer_no, title, list_label) async {
-  print(title);
-
-  if (title == null) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) =>
-            LabelSeletionScreen(infer_no: infer_no, predict_labels: list_label,),
-      ),
-    );
-  } else {
-    String url = 'https://192.168.0.88:5443/infer_feedback';
-    var postUri = Uri.parse(url);
-
-    String CRUDENTIAL_KEY = "testauthcode";
-
-    var header = {"Content-type": "application/json", 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET'};
-    http.Response res = await http.post(postUri, headers:header, body: json.encode({
-      "key": CRUDENTIAL_KEY,
-      "auth": 'code',
-      "ID": 'None',
-      "PW": 'None',
-      "feedback": title,
-      "infer_no": infer_no,
-    }));
-
-    String resBody = utf8.decode(res.bodyBytes);
-    Map<String, dynamic> resultMap = jsonDecode(resBody);
-
-    print(resultMap['result']);
-    resultMap['result'] = 'ok';
-
-    return resultMap;
-  }
-}
-
+// 추론 요청 화면 UI
 class CameraApp extends StatefulWidget {
   @override
   _CameraAppState createState() => _CameraAppState();
 }
 
+// 상단 Bar를 가진 UI
+// TODO 웹화면은 상단 바가 아니라 title에 해당 내용이 나오고 환영 문구가 있으니 여기도 분기 필요
 class _CameraAppState extends State<CameraApp> {
   @override
   Widget build(BuildContext context) {
@@ -130,11 +180,13 @@ class _CameraAppState extends State<CameraApp> {
   }
 }
 
+// 메인 컨텐츠 부분 UI
 class AppBody extends StatefulWidget {
   @override
   _AppBodyState createState() => _AppBodyState();
 }
 
+// UI 시작부분에서 사용가능한 카메라 가져오고 로딩이 끝나면 화면 로딩
 class _AppBodyState extends State<AppBody> {
   bool cameraAccess = false;
   String? error;
@@ -181,6 +233,7 @@ class _AppBodyState extends State<AppBody> {
   }
 }
 
+// 카메라와 아래 조작부를 포함한 메인 컨텐츠 화면 UI
 class CameraView extends StatefulWidget {
   final List<camlib.CameraDescription> cameras;
 
@@ -193,25 +246,14 @@ class CameraView extends StatefulWidget {
 class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
   String? error;
   camlib.CameraController? controller;
-  double? zoomLevel;
   late camlib.CameraDescription cameraDescription = widget.cameras[0];
-
-  double? minZoom;
-  double? maxZoom;
-
-  double? minExposure;
-  double? maxExposure;
-  double? exposure;
-
-  bool recording = false;
-  bool flashLight = false;
-  bool orientationLocked = false;
 
   Uint8List? captured = null;
   bool suspending = false;
   bool isLoading = false;
   camlib.CameraPreview? cameraPreview = null;
   Widget? previewFrame = null;
+  List<Map<String, dynamic>> listLabel = [];
 
   List<Widget> list_results = [];
 
@@ -227,24 +269,7 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
     try {
       await controller!.initialize();
 
-      final minZoom = await controller!.getMinZoomLevel();
-      final maxZoom = await controller!.getMaxZoomLevel();
-
-      final minExposure = await controller!.getMinExposureOffset();
-      final maxExposure = await controller!.getMaxExposureOffset();
-
-      print(minZoom);
-      print(maxZoom);
-      print(maxExposure);
-      print(minExposure);
       setState(() {
-        this.minZoom = minZoom;
-        this.maxZoom = maxZoom;
-        this.zoomLevel = minZoom;
-
-        this.minExposure = minExposure;
-        this.maxExposure = maxExposure;
-        this.exposure = 1;
       });
     } catch (e) {
       setState(() {
@@ -261,6 +286,13 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
       vsync: this,  //vsync에 this 형태로 전달해야 애니메이션이 정상 처리됨
     );
     super.initState();
+  }
+
+  void notifyReceive() {
+    setState(() {
+      suspending = false;
+      list_results = [];
+    });
   }
 
   @override
@@ -311,8 +343,6 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
       unselectedLabelColor: Colors.black,
       controller: _tabController,
     );
-
-    print(controller!.value.aspectRatio);
 
     Widget? viewToShow = null;
     if (isLoading) {
@@ -376,17 +406,17 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
                 camlib.XFile xfile = await controller!.takePicture();
                 Uint8List byteImg = await xfile.readAsBytes();
 
-                Map<String, dynamic> resultMap = await requestInference(xfile);
-                print(resultMap);
+                img.Image? image = img.decodeImage(await xfile.readAsBytes());
+                Map<String, dynamic> resultMap = await requestInference(image);
                 captured = resultMap['thumbnail'];
                 int infer_no = resultMap['infer_no'];
                 List<Widget> tmp_list_results = [];
-                List<String>? list_infer = (resultMap['cls_list'] as List)?.map((item) => item as String)?.toList();
+                List<int>? list_infer = (resultMap['cls_list'] as List)?.map((item) => item as int)?.toList();
                 for (var element in list_infer!) {
                   tmp_list_results.add(
                       ElevatedButton(
                         onPressed: () async {
-                          sendFeedback(context, infer_no, element, list_infer);
+                          sendFeedback(infer_no, element);
 
                           setState(() {
                             suspending = false;
@@ -396,13 +426,22 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
                         style: ElevatedButton.styleFrom(
                             minimumSize: Size(width, 30) // put the width and height you want
                         ),
-                        child: Text(element),
+                        child: Text(labelMap[element]!),
                       )
                   );
                 }
                 tmp_list_results.add(
                     ElevatedButton(
-                      onPressed: () async {sendFeedback(context, infer_no, null, list_infer); },
+                      onPressed: () async {
+                        // title이 null인 경우(기타 클릭 시) 기타 라벨 선택 화면으로 이동
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                LabelSeletionScreen(infer_no: infer_no, predict_labels: list_infer, parentNotify: notifyReceive),
+                          ),
+                        );
+                      },
                       style: ElevatedButton.styleFrom(
                           minimumSize: Size(width, 30) // put the width and height you want
                       ),
@@ -429,14 +468,14 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
           controller: _tabController,
           children: [
             cameraView,
-            Container(
-              color: Colors.green[200],
-              alignment: Alignment.center,
-              child: const Text(
-                'Tab2 View',
-                style: TextStyle(
-                  fontSize: 30,
-                ),
+            Scaffold(
+              appBar: null,
+              body: Container(),
+              floatingActionButton: FloatingActionButton(
+                onPressed: () {
+                  print('!');
+                },
+                child: const Icon(Icons.navigation),
               ),
             ),
           ],
@@ -449,9 +488,10 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
 // 기타 선택
 class LabelSeletionScreen extends StatefulWidget {
   final int infer_no;
-  final List<String> predict_labels;
+  final List<int> predict_labels;
+  final Function() parentNotify;
 
-  const LabelSeletionScreen({Key? key, required this.infer_no, required this.predict_labels}) : super(key: key);
+  const LabelSeletionScreen({Key? key, required this.infer_no, required this.predict_labels, required this.parentNotify}) : super(key: key);
 
   @override
   State<StatefulWidget> createState() => _LabelSeletionScreenState();
@@ -466,7 +506,7 @@ class _LabelSeletionScreenState extends State<LabelSeletionScreen>{
     List<TableRow> listTableRow = [];
     List<Widget> listCell = [];
     int idx = 0;
-    widget.predict_labels.forEach((element) {
+    labelList.forEach((element) {
       listCell.add(
         TableCell(
           verticalAlignment: TableCellVerticalAlignment.middle,
@@ -474,10 +514,12 @@ class _LabelSeletionScreenState extends State<LabelSeletionScreen>{
             height: 32,
             color: Colors.green,
             child: ElevatedButton(
-              onPressed: () async {
-                sendFeedback(context, widget.infer_no, element, null);
+              onPressed: widget.predict_labels.contains(element) ? null : () async {
+                sendFeedback(widget.infer_no, element);
+                widget.parentNotify();
+                Navigator.pop(context);
               },
-              child: Text(element),
+              child: Text(labelMap[element]!),
             ),
           )
         )
@@ -517,9 +559,6 @@ class _LabelSeletionScreenState extends State<LabelSeletionScreen>{
         children: listTableRow,
       );
     });
-    print(table);
-    print(listTableRow);
-    print(listCell);
     super.initState();
   }
 
