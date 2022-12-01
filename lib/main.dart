@@ -1,15 +1,20 @@
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:core';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:flutter/material.dart';
 import 'package:universal_html/html.dart' as html;
 
 import 'package:camera/camera.dart' as camlib;
 
 import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
 import 'package:image/image.dart' as img;
 
 import 'package:flutter/foundation.dart';
+
+import 'package:image_picker/image_picker.dart';
 
 // 카메라 기능 참고
 // https://github.com/flutter/flutter/issues/45297 -> Hexer10
@@ -41,7 +46,7 @@ Future<void> main() async {
   runApp(
     MaterialApp(
       theme: ThemeData.dark(),
-      home: CameraApp(),
+      home: LoginPage(),
     ),
   );
 }
@@ -54,6 +59,23 @@ class NoCheckCertificateHttpOverrides extends io.HttpOverrides {
       ..badCertificateCallback =
           (io.X509Certificate cert, String host, int port) => true;
   }
+}
+
+
+requestLogin(id, password) async {
+  var data = {'id': id, 'password': password};
+  var url = "https://192.168.0.88:5443/login";
+  var postUri = Uri.parse(url);
+  var res = await http.post(postUri, body: data);
+  String resBody = utf8.decode(res.bodyBytes);
+  Map<String, dynamic> resultmap = jsonDecode(resBody);
+  Map<String, String> resultMap = {};
+  resultMap['log_in_st'] = resultmap['log_in_st'].toString();
+  resultMap['str_no'] = resultmap['str_no'].toString();
+  resultMap['login_no'] = resultmap['login_no'].toString();
+  resultMap['act_yn'] = resultmap['act_yn'].toString();
+  resultMap['log_in_text'] = resultmap['log_in_text'].toString();
+  return resultMap;
 }
 
 // 선택한 피드백을 서버에 제출
@@ -161,6 +183,194 @@ sendFeedback(infer_no, title) async {
   return resultMap;
 }
 
+// 로그인 화면 UI
+class LoginPage extends StatefulWidget {
+  @override
+  _LoginPageState createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage>
+    with WidgetsBindingObserver {
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    switch (state) {
+      case AppLifecycleState.detached:
+        await prefs.clear();
+        break;
+
+      case AppLifecycleState.paused:
+      // await prefs.clear();
+        break;
+
+      case AppLifecycleState.resumed:
+        // TODO: Handle this case.
+        break;
+
+      case AppLifecycleState.inactive:
+        // TODO: Handle this case.
+        break;
+    }
+  }
+
+  final formKey = new GlobalKey<FormState>();
+
+  late String id;
+  late String password;
+
+  Map<String, String> resultMap = {};
+
+  Text title_text = Text('');
+  Text act_text = Text('');
+
+  void validateAndSave() {
+    final form = formKey.currentState;
+    if (form!.validate()) {
+      form.save();
+      print('Form is valid Email: $id, password: $password');
+    } else {
+      print('Form is invalid Email: $id, password: $password');
+    }
+  }
+
+  loginFailure(BuildContext context, resultMap) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    if (resultMap['log_in_st'] == "0") {
+      prefs.setString('ID', id);
+      prefs.setString('PW', password);
+      prefs.setString('str_no', resultMap['str_no']);
+      prefs.setString('login_no', resultMap['login_no']);
+      prefs.setString('act_yn', resultMap['act_yn']);
+
+      Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (BuildContext context) => CameraApp()));
+    } else {
+      if (resultMap['log_in_st'] == "1") {
+        title_text = Text(
+          '인증 실패',
+          textAlign: TextAlign.left,
+        );
+        act_text = Text(
+          resultMap['log_in_text'],
+          textAlign: TextAlign.center,
+        );
+      } else if (resultMap['log_in_st'] == "2") {
+        title_text = Text(
+          '로그인 실패',
+          textAlign: TextAlign.left,
+        );
+        act_text = Text(
+          resultMap['log_in_text'],
+          textAlign: TextAlign.center,
+        );
+      } else if (resultMap['log_in_st'] == "3") {
+        title_text = Text(
+          '로그인 실패',
+          textAlign: TextAlign.left,
+        );
+        act_text = Text(
+          resultMap['log_in_text'],
+          textAlign: TextAlign.center,
+        );
+      }
+      return showDialog<void>(
+        context: context,
+        barrierDismissible: false, // user must tap button!
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: title_text,
+            content: SingleChildScrollView(
+              child: ListBody(
+                children: <Widget>[
+                  act_text,
+                ],
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                child: const Text('확인'),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
+          );
+        },
+      );
+    }
+  }
+
+  @override
+  void clear_prefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    prefs.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    clear_prefs();
+
+    return Scaffold(
+      appBar: new AppBar(
+        title: new Text('R-pha Vision V1.0'),
+      ),
+      body: Container(
+          padding: EdgeInsets.all(16),
+          child: Form(
+            key: formKey,
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  new TextFormField(
+                    decoration: new InputDecoration(labelText: 'Id'),
+                    validator: (value) =>
+                    value!.isEmpty ? 'Id can\'t be empty' : null,
+                    onSaved: (value) => id = value!,
+                    onChanged: (value) => id = value,
+                  ),
+                  new TextFormField(
+                    obscureText: true,
+                    decoration: new InputDecoration(labelText: 'Password'),
+                    validator: (value) =>
+                    value!.isEmpty ? 'Password can\'t be empty' : null,
+                    onSaved: (value) => password = value!,
+                    onChanged: (value) => password = value,
+                  ),
+                  ElevatedButton(
+                    child: new Text(
+                      'Login',
+                      style: new TextStyle(fontSize: 20.0),
+                    ),
+
+                    onPressed: () async {
+                      final prefs = await SharedPreferences.getInstance();
+                      validateAndSave();
+                      Map<String, String> resultMap = await requestLogin(id, password);
+                      loginFailure(context, resultMap);
+                    },
+                  ),
+                ]),
+          )),
+    );
+  }
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+}
+
 // 추론 요청 화면 UI
 class CameraApp extends StatefulWidget {
   @override
@@ -250,12 +460,18 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
 
   Uint8List? captured = null;
   bool suspending = false;
+  bool suspending2 = false;
+  int suspendingImage = -1;
   bool isLoading = false;
   camlib.CameraPreview? cameraPreview = null;
   Widget? previewFrame = null;
   List<Map<String, dynamic>> listLabel = [];
 
+  final ImagePicker _picker = ImagePicker();
+  List<Uint8List> imgFileList = [];
+
   List<Widget> list_results = [];
+  List<Widget> list_results_2 = [];
 
   late TabController _tabController;
 
@@ -300,6 +516,14 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
       suspending = false;
       list_results = [];
       initCam(cameraDescription);
+    });
+  }
+
+  void notifyReceive2() {
+    setState(() {
+      suspending2 = false;
+      suspendingImage = -1;
+      list_results_2 = [];
     });
   }
 
@@ -413,7 +637,6 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
                 controller!.lockCaptureOrientation();
 
                 camlib.XFile xfile = await controller!.takePicture();
-                Uint8List byteImg = await xfile.readAsBytes();
 
                 img.Image? image = img.decodeImage(await xfile.readAsBytes());
                 Map<String, dynamic> resultMap = await requestInference(image);
@@ -470,6 +693,95 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
       ),
     );
 
+    List<Widget> imageViewList = [];
+    int tmpIdx = 0;
+    imgFileList.forEach((element) async {
+      int innerIdx = tmpIdx;
+      imageViewList.add(
+        IconButton(
+          onPressed: suspending2 ? null : () async {
+            setState(() {
+              suspending2 = true;
+              suspendingImage = innerIdx;
+            });
+            Map<String, dynamic> resultMap = await requestInference(img.decodeImage(element));
+            int infer_no = resultMap['infer_no'];
+            List<Widget> tmp_list_results = [];
+            List<int>? list_infer = (resultMap['cls_list'] as List)?.map((item) => item as int)?.toList();
+            for (var element in list_infer!) {
+              tmp_list_results.add(
+                  ElevatedButton(
+                    onPressed: () async {
+                      sendFeedback(infer_no, element);
+
+                      setState(() {
+                        suspending2 = false;
+                        suspendingImage = -1;
+                        list_results_2 = [];
+                      });
+                    },
+                    style: ElevatedButton.styleFrom(
+                        minimumSize: Size(width, 30) // put the width and height you want
+                    ),
+                    child: Text(labelMap[element]!),
+                  )
+              );
+            }
+            tmp_list_results.add(
+                ElevatedButton(
+                  onPressed: () async {
+                    // title이 null인 경우(기타 클릭 시) 기타 라벨 선택 화면으로 이동
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            LabelSeletionScreen(infer_no: infer_no, predict_labels: list_infer, parentNotify: notifyReceive2),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                      minimumSize: Size(width, 30) // put the width and height you want
+                  ),
+                  child: const Text('기타'),
+                )
+            );
+
+            setState(() {
+              list_results_2 = tmp_list_results;
+            });
+          },
+          iconSize: 160,
+          icon: Container(
+            width: 150,
+            height: 150,
+            decoration: BoxDecoration(
+              border: Border.all(
+                width: 1,
+                color: Colors.black45,
+              ),
+            ),
+            child: Stack(
+              children: [
+                Container(
+                  child: suspendingImage == innerIdx ? new Icon(
+                    Icons.done,
+                    size: 150,
+                  ) : null,
+                  decoration: BoxDecoration(
+                      image:DecorationImage(
+                        fit: BoxFit.cover,
+                        colorFilter: ColorFilter.mode(Colors.black.withOpacity(suspendingImage == innerIdx ? 0.2 : 1.0), BlendMode.dstATop),
+                        image: Image.memory(element).image,
+                      )
+                  )
+                ),
+              ]
+            )
+        ),
+      ));
+      tmpIdx += 1;
+    });
+
     return Column(children: [
       tabBar,
       Expanded(
@@ -479,12 +791,62 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
             cameraView,
             Scaffold(
               appBar: null,
-              body: Container(),
+              body: Column(
+                children: [
+                  Container(
+                    alignment: Alignment.center,
+                    width: width,
+                    height: width*0.5,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: imageViewList,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    height: 20,
+                    child: const Text("Results"),
+                  ),
+                  Expanded(
+                    child:
+                    SingleChildScrollView(
+                      child: Column(
+                        children: list_results_2,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
               floatingActionButton: FloatingActionButton(
-                onPressed: () {
-                  print('!');
+                onPressed: suspending2
+                ? () {
+                  setState(() {
+                    suspending2 = false;
+                    list_results_2 = [];
+                    suspendingImage = -1;
+                  });
+                } : () async {
+                  final List<camlib.XFile> _images = await _picker.pickMultiImage();
+                  if (_images != null) {
+                    final List<Uint8List> tmpList = [];
+                    tmpList.addAll(imgFileList);
+                    for (var element in _images) {
+                      tmpList.add(await element.readAsBytes());
+                    }
+                    setState(() {
+                      imgFileList = tmpList;
+                    });
+                  }
+                  // FilePickerResult? result = await FilePicker.platform.pickFiles(
+                  //   type: FileType.image,
+                  // );
+                  // if (result != null && result.files.isNotEmpty) {
+                  //   String fileName = result.files.first.name;
+                  //   Uint8List fileBytes = result.files.first.bytes!;
+                  //   imgFileList.add(img.Image.fromBytes(fileBytes));
+                  // }
                 },
-                child: const Icon(Icons.navigation),
+                child: suspending2 ? const Icon(Icons.replay) : const Icon(Icons.navigation),
               ),
             ),
           ],
