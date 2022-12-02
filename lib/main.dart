@@ -47,17 +47,6 @@ Future<void> main() async {
   // TODO 실서비스 배포시 삭제하거나 개발용에서만 동작하도록 수정
   io.HttpOverrides.global = NoCheckCertificateHttpOverrides();
 
-  Map<String, dynamic> resultMap = await getLabelList();
-  if (resultMap['result'] == 'ok') {
-    List<dynamic> resultLabelList = resultMap['str_label_list'];
-    resultLabelList.forEach((element) {
-      List<dynamic> eleMap = element;
-      labelMap[eleMap[0]] = eleMap[2];
-      labelList.add(eleMap[0]);
-    });
-    print(labelMap);
-  }
-
   runApp(
     MaterialApp(
       theme: ThemeData.dark(),
@@ -83,45 +72,13 @@ class NoCheckCertificateHttpOverrides extends io.HttpOverrides {
 
 
 requestLogin(id, password) async {
+  var header = {"Content-type": "application/json", 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET'};
   var data = {'id': id, 'password': password};
   var url = "https://192.168.0.88:5443/login";
   var postUri = Uri.parse(url);
-  var res = await http.post(postUri, body: data);
-  String resBody = utf8.decode(res.bodyBytes);
-  Map<String, dynamic> resultmap = jsonDecode(resBody);
-  Map<String, String> resultMap = {};
-  resultMap['log_in_st'] = resultmap['log_in_st'].toString();
-  resultMap['str_no'] = resultmap['str_no'].toString();
-  resultMap['login_no'] = resultmap['login_no'].toString();
-  resultMap['act_yn'] = resultmap['act_yn'].toString();
-  resultMap['log_in_text'] = resultmap['log_in_text'].toString();
-  return resultMap;
-}
-
-// 선택한 피드백을 서버에 제출
-Future<Map<String, dynamic>> getLabelList() async {
-  // 피드백 제출 URL
-  // TODO 주소는 공통 전역 변수로 변경
-  String url = 'https://192.168.0.88:5443/initialize';
-  var postUri = Uri.parse(url);
-
-  final prefs = await SharedPreferences.getInstance();
-
-  // TODO 인증코드 관련 수정은 위의 추론 요청과 동일
-  String CRUDENTIAL_KEY = "testauthcode";
-
-  var header = {"Content-type": "application/json", 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET'};
-  http.Response res = await http.post(postUri, headers:header, body: json.encode({
-    "key": CRUDENTIAL_KEY,
-    "auth": 'code',
-    "ID": 'None',
-    "PW": 'None',
-    "store_no": prefs.getString('str_no'),
-  }));
-
+  var res = await http.post(postUri, body: jsonEncode(data), headers: header);
   String resBody = utf8.decode(res.bodyBytes);
   Map<String, dynamic> resultMap = Map.castFrom(jsonDecode(resBody));
-
   return resultMap;
 }
 
@@ -270,19 +227,26 @@ class _LoginPageState extends State<LoginPage>
   loginFailure(BuildContext context, resultMap) async {
     final prefs = await SharedPreferences.getInstance();
 
-    if (resultMap['log_in_st'] == "0") {
+    if (resultMap['log_in_st'] == 0) {
       prefs.setString('ID', id);
       prefs.setString('PW', password);
-      prefs.setString('str_no', resultMap['str_no']);
-      prefs.setString('login_no', resultMap['login_no']);
-      prefs.setString('act_yn', resultMap['act_yn']);
+      prefs.setString('str_no', resultMap['str_no'].toString());
+      prefs.setString('login_no', resultMap['login_no'].toString());
+      prefs.setString('act_yn', resultMap['act_yn'].toString());
+
+      List<dynamic> resultLabelList = resultMap['label_init'];
+      resultLabelList.forEach((element) {
+        List<dynamic> eleMap = element;
+        labelMap[eleMap[0]] = eleMap[2];
+        labelList.add(eleMap[0]);
+      });
 
       Navigator.pushReplacement(
           context,
           MaterialPageRoute(
               builder: (BuildContext context) => CameraApp()));
     } else {
-      if (resultMap['log_in_st'] == "1") {
+      if (resultMap['log_in_st'] == 1) {
         title_text = Text(
           '인증 실패',
           textAlign: TextAlign.left,
@@ -291,7 +255,7 @@ class _LoginPageState extends State<LoginPage>
           resultMap['log_in_text'],
           textAlign: TextAlign.center,
         );
-      } else if (resultMap['log_in_st'] == "2") {
+      } else if (resultMap['log_in_st'] == 2) {
         title_text = Text(
           '로그인 실패',
           textAlign: TextAlign.left,
@@ -300,7 +264,7 @@ class _LoginPageState extends State<LoginPage>
           resultMap['log_in_text'],
           textAlign: TextAlign.center,
         );
-      } else if (resultMap['log_in_st'] == "3") {
+      } else if (resultMap['log_in_st'] == 3) {
         title_text = Text(
           '로그인 실패',
           textAlign: TextAlign.left,
@@ -373,7 +337,7 @@ class _LoginPageState extends State<LoginPage>
 
                     onPressed: () async {
                       validateAndSave();
-                      Map<String, String> resultMap = await requestLogin(id, password);
+                      Map<String, dynamic> resultMap = await requestLogin(id, password);
                       loginFailure(context, resultMap);
                     },
                   ),
