@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:core';
+import 'dart:io';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -25,9 +26,22 @@ import 'package:image_picker/image_picker.dart';
 
 Map<int, String> labelMap = Map();
 List<int> labelList = [];
+String device = "";
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (kIsWeb) {
+    device = "web";
+  } else {
+    if (Platform.isAndroid) {
+      device = "android";
+    } else {
+      device = "unknown";
+    }
+  }
+
+  clear_prefs();
 
   // 테스트용 https에서만 사용할 인증 절차 무시하는 코드
   // TODO 실서비스 배포시 삭제하거나 개발용에서만 동작하도록 수정
@@ -41,6 +55,7 @@ Future<void> main() async {
       labelMap[eleMap[0]] = eleMap[2];
       labelList.add(eleMap[0]);
     });
+    print(labelMap);
   }
 
   runApp(
@@ -49,6 +64,11 @@ Future<void> main() async {
       home: LoginPage(),
     ),
   );
+}
+
+void clear_prefs() async {
+  final prefs = await SharedPreferences.getInstance();
+  prefs.clear();
 }
 
 // TODO SSL Self-certification으로 인해 추가된 코드, 이후 공식 SSL 적용 시 삭제하거나 개발용에서만 사용하도록 수정
@@ -85,6 +105,8 @@ Future<Map<String, dynamic>> getLabelList() async {
   String url = 'https://192.168.0.88:5443/initialize';
   var postUri = Uri.parse(url);
 
+  final prefs = await SharedPreferences.getInstance();
+
   // TODO 인증코드 관련 수정은 위의 추론 요청과 동일
   String CRUDENTIAL_KEY = "testauthcode";
 
@@ -94,7 +116,7 @@ Future<Map<String, dynamic>> getLabelList() async {
     "auth": 'code',
     "ID": 'None',
     "PW": 'None',
-    "store_no": 0,
+    "store_no": prefs.getString('str_no'),
   }));
 
   String resBody = utf8.decode(res.bodyBytes);
@@ -132,6 +154,8 @@ requestInference(img.Image? image) async {
   Codec<String, String> stringToBase64 = utf8.fuse(base64);
   String encoded = stringToBase64.encode(byteImg.toString());
 
+  final prefs = await SharedPreferences.getInstance();
+
   // json형식으로 보내기 때문에 헤더 설정 필수
   // TODO 실제 운영 서비스에 올릴 경우 CORS 설정 세분화 필요(주소 지정, 메소드 지정 등)
   var header = {"Content-type": "application/json", 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET'};
@@ -142,9 +166,10 @@ requestInference(img.Image? image) async {
     "channel": '3',
     "key": CRUDENTIAL_KEY,
     "auth": 'code',
-    "ID": 'None',
-    "PW": 'None',
-    'store_no': 0,
+    "ID": prefs.getString('ID'),
+    "PW": prefs.getString('PW'),
+    'store_no': prefs.getString('str_no'),
+    'send_device': device
   }));
 
   // 결과 파일을 Map 형식으로 받아옴
@@ -153,6 +178,7 @@ requestInference(img.Image? image) async {
 
   // 피드백 화면에서 고정된 이미지를 보여주기 위해 원본 크기의 Crop된 이미지 face 전달
   resultMap['thumbnail'] = img.encodeJpg(face);
+  print(resultMap);
 
   return resultMap;
 }
@@ -312,15 +338,7 @@ class _LoginPageState extends State<LoginPage>
   }
 
   @override
-  void clear_prefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    prefs.clear();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    clear_prefs();
-
     return Scaffold(
       appBar: new AppBar(
         title: new Text('R-pha Vision V1.0'),
@@ -354,7 +372,6 @@ class _LoginPageState extends State<LoginPage>
                     ),
 
                     onPressed: () async {
-                      final prefs = await SharedPreferences.getInstance();
                       validateAndSave();
                       Map<String, String> resultMap = await requestLogin(id, password);
                       loginFailure(context, resultMap);
@@ -770,7 +787,7 @@ class _CameraViewState extends State<CameraView> with TickerProviderStateMixin{
                   decoration: BoxDecoration(
                       image:DecorationImage(
                         fit: BoxFit.cover,
-                        colorFilter: ColorFilter.mode(Colors.black.withOpacity(suspendingImage == innerIdx ? 0.2 : 1.0), BlendMode.dstATop),
+                        colorFilter: ColorFilter.mode(suspending2 ? Colors.black.withOpacity(suspendingImage == innerIdx ? 0.2 : 0.6) : Colors.black.withOpacity(1.0), BlendMode.dstATop),
                         image: Image.memory(element).image,
                       )
                   )
