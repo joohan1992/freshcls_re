@@ -37,6 +37,7 @@ dependencies:
   http_parser:
   universal_html:
   image_picker:
+  provider:
 
 
   # The following adds the Cupertino Icons font to your application.
